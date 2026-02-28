@@ -1,8 +1,10 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const User = require('../models/User');
 const config = require('../config');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
+const { sendPasswordResetEmail } = require('../utils/emailService');
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -123,4 +125,66 @@ exports.changePassword = asyncHandler(async (req, res) => {
   await user.save();
 
   res.json({ success: true, message: 'Password changed successfully' });
+});
+
+// POST /api/auth/forgot-password
+exports.forgotPassword = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  if (!email) throw new ApiError(400, 'Please provide an email address');
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    // Don't reveal if user exists
+    return res.json({ success: true, message: 'If that email is registered, a password reset link has been sent.' });
+  }
+
+  const resetToken = user.getResetPasswordToken();
+  await user.save({ validateBeforeSave: false });
+
+  const resetUrl = `${req.headers.origin || 'http://localhost:5173'}/reset-password/${resetToken}`;
+
+  try {
+    await sendPasswordResetEmail(user.email, resetToken, resetUrl);
+    res.json({ success: true, message: 'If that email is registered, a password reset link has been sent.' });
+  } catch (err) {
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save({ validateBeforeSave: false });
+    throw new ApiError(500, 'Email could not be sent. Please try again later.');
+  }
+});
+
+// POST /api/auth/reset-password/:token
+exports.resetPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 6) {
+    throw new ApiError(400, 'Password must be at least 6 characters');
+  }
+
+  const resetPasswordToken = crypto.createHash('sha256').update(req.params.token).digest('hex');
+
+  const user = await User.findOne({
+    resetPasswordToken,
+    resetPasswordExpire: { $gt: Date.now() },
+  });
+
+  if (!user) {
+    throw new ApiError(400, 'Invalid or expired reset token');
+  }
+
+  user.password = password;
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpire = undefined;
+  user.loginAttempts = 0;
+  user.lockedUntil = undefined;
+  await user.save();
+
+  const token = generateToken(user);
+
+  res.json({
+    success: true,
+    message: 'Password reset successful',
+    token,
+    user: formatUser(user),
+  });
 });

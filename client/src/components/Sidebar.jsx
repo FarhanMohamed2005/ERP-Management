@@ -25,6 +25,7 @@ import {
   History as ActivityLogIcon,
   RequestQuote as QuotationIcon,
   AccountBalanceWallet as ExpenseIcon,
+  Settings as SettingsIcon,
 } from '@mui/icons-material';
 
 const menuItems = [
@@ -46,6 +47,7 @@ const menuItems = [
   { divider: true, label: 'Administration' },
   { label: 'Activity Log', path: '/activity-log', icon: <ActivityLogIcon />, roles: ['Admin'] },
   { label: 'User Management', path: '/users', icon: <AdminIcon />, roles: ['Admin'] },
+  { label: 'Settings', path: '/settings', icon: <SettingsIcon />, roles: ['Admin'] },
 ];
 
 const Sidebar = ({ onClose }) => {

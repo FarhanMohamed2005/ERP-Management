@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
 const connectDB = require('./config/db');
 const config = require('./config');
 const errorHandler = require('./middleware/errorHandler');
@@ -10,14 +12,36 @@ const app = express();
 
 connectDB();
 
-// Security & parsing middleware
+// Security middleware
 app.use(helmet());
+app.use(mongoSanitize());
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: config.corsOrigins || ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  message: { success: false, message: 'Too many requests, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { success: false, message: 'Too many login attempts, please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 
 if (config.nodeEnv === 'development') {
   app.use(morgan('dev'));
@@ -47,6 +71,7 @@ app.use('/api/credit-notes', require('./routes/creditNotes'));
 app.use('/api/quotations', require('./routes/quotations'));
 app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/ai', require('./routes/ai'));
+app.use('/api/settings', require('./routes/settings'));
 
 // 404 handler
 app.use((req, res) => {

@@ -57,4 +57,9 @@ expenseSchema.pre('save', async function (next) {
   next();
 });
 
+expenseSchema.index({ status: 1, createdAt: -1 });
+expenseSchema.index({ category: 1 });
+expenseSchema.index({ createdBy: 1, createdAt: -1 });
+expenseSchema.index({ date: -1 });
+
 module.exports = mongoose.model('Expense', expenseSchema);

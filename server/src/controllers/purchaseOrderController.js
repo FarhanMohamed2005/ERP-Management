@@ -56,3 +56,14 @@ exports.updatePurchaseOrder = asyncHandler(async (req, res) => {
   }
   res.json({ success: true, message: 'Purchase order updated successfully', data: order });
 });
+
+exports.deletePurchaseOrder = asyncHandler(async (req, res) => {
+  const order = await PurchaseOrder.findById(req.params.id);
+  if (!order) throw new ApiError(404, 'Purchase order not found');
+  if (!['Draft', 'Cancelled'].includes(order.status)) {
+    throw new ApiError(400, 'Only draft or cancelled orders can be deleted');
+  }
+  await PurchaseOrder.findByIdAndDelete(req.params.id);
+  logActivity({ user: req.user, action: 'delete', entity: 'PurchaseOrder', entityId: order._id, description: `Deleted purchase order "${order.orderNumber}"` });
+  res.json({ success: true, message: 'Purchase order deleted successfully' });
+});

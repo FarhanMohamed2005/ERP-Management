@@ -57,5 +57,7 @@ const productSchema = new mongoose.Schema(
 );
 
 productSchema.index({ title: 'text', sku: 'text' });
+productSchema.index({ category: 1 });
+productSchema.index({ isActive: 1, stock: 1 });
 
 module.exports = mongoose.model('Product', productSchema);

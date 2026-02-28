@@ -6,6 +6,95 @@ const Supplier = require('../models/Supplier');
 const Invoice = require('../models/Invoice');
 const Expense = require('../models/Expense');
 const asyncHandler = require('../utils/asyncHandler');
+const config = require('../config');
+
+let genAI = null;
+let model = null;
+
+const initGemini = () => {
+  if (!genAI && config.geminiApiKey) {
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    genAI = new GoogleGenerativeAI(config.geminiApiKey);
+    model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+  }
+  return model;
+};
+
+// Gather business context for AI
+const getBusinessContext = async () => {
+  const now = new Date();
+  const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const [productCount, customerCount, supplierCount, lowStockCount, overdueCount] = await Promise.all([
+    Product.countDocuments({ isActive: true }),
+    Customer.countDocuments({ isActive: true }),
+    Supplier.countDocuments({ isActive: true }),
+    Product.countDocuments({ $expr: { $lte: ['$stock', '$reorderLevel'] } }),
+    Invoice.countDocuments({ status: { $in: ['Unpaid', 'Overdue'] }, dueDate: { $lt: now } }),
+  ]);
+
+  const [revenue] = await SalesOrder.aggregate([
+    { $match: { createdAt: { $gte: thisMonth }, status: { $nin: ['Cancelled'] } } },
+    { $group: { _id: null, total: { $sum: '$totalPrice' }, count: { $sum: 1 } } },
+  ]);
+  const [allTimeRev] = await SalesOrder.aggregate([
+    { $match: { status: { $nin: ['Cancelled'] } } },
+    { $group: { _id: null, total: { $sum: '$totalPrice' }, count: { $sum: 1 } } },
+  ]);
+
+  const topProducts = await SalesOrder.aggregate([
+    { $match: { status: { $nin: ['Cancelled'] } } },
+    { $unwind: '$items' },
+    { $group: { _id: '$items.product', totalRev: { $sum: '$items.total' }, name: { $first: '$items.productTitle' }, qty: { $sum: '$items.quantity' } } },
+    { $sort: { totalRev: -1 } },
+    { $limit: 5 },
+  ]);
+
+  const topCustomers = await SalesOrder.aggregate([
+    { $match: { status: { $nin: ['Cancelled'] } } },
+    { $group: { _id: '$customer', totalSpent: { $sum: '$totalPrice' }, orderCount: { $sum: 1 } } },
+    { $sort: { totalSpent: -1 } },
+    { $limit: 5 },
+    { $lookup: { from: 'customers', localField: '_id', foreignField: '_id', as: 'info' } },
+    { $unwind: { path: '$info', preserveNullAndEqualDocuments: true } },
+    { $project: { name: '$info.name', totalSpent: 1, orderCount: 1 } },
+  ]);
+
+  const ordersByStatus = await SalesOrder.aggregate([
+    { $group: { _id: '$status', count: { $sum: 1 } } },
+  ]);
+
+  const lowStockProducts = await Product.find({ $expr: { $lte: ['$stock', '$reorderLevel'] } })
+    .select('title sku stock reorderLevel')
+    .sort({ stock: 1 })
+    .limit(10);
+
+  let expenseTotal = 0;
+  try {
+    const [exp] = await Expense.aggregate([
+      { $match: { date: { $gte: thisMonth }, status: { $ne: 'Rejected' } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+    expenseTotal = exp?.total || 0;
+  } catch (e) { /* ignore */ }
+
+  return {
+    productCount,
+    customerCount,
+    supplierCount,
+    lowStockCount,
+    overdueInvoices: overdueCount,
+    thisMonthRevenue: revenue?.total || 0,
+    thisMonthOrders: revenue?.count || 0,
+    allTimeRevenue: allTimeRev?.total || 0,
+    allTimeOrders: allTimeRev?.count || 0,
+    topProducts: topProducts.map(p => `${p.name}: $${p.totalRev.toLocaleString()} (${p.qty} sold)`),
+    topCustomers: topCustomers.map(c => `${c.name || 'Unknown'}: $${c.totalSpent.toLocaleString()} (${c.orderCount} orders)`),
+    ordersByStatus: ordersByStatus.reduce((acc, o) => { acc[o._id] = o.count; return acc; }, {}),
+    lowStockProducts: lowStockProducts.map(p => `${p.title} (SKU: ${p.sku}): ${p.stock} in stock, reorder at ${p.reorderLevel}`),
+    thisMonthExpenses: expenseTotal,
+  };
+};
 
 // ──────────── AI BUSINESS INSIGHTS ────────────
 exports.getInsights = asyncHandler(async (req, res) => {
@@ -14,7 +103,6 @@ exports.getInsights = asyncHandler(async (req, res) => {
   const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
 
-  // Revenue this month vs last month
   const [thisMonthRev] = await SalesOrder.aggregate([
     { $match: { createdAt: { $gte: thisMonth }, status: { $nin: ['Cancelled'] } } },
     { $group: { _id: null, total: { $sum: '$totalPrice' }, count: { $sum: 1 } } },
@@ -28,7 +116,6 @@ exports.getInsights = asyncHandler(async (req, res) => {
   const previousRev = lastMonthRev?.total || 0;
   const revChange = previousRev > 0 ? Math.round(((currentRev - previousRev) / previousRev) * 100) : currentRev > 0 ? 100 : 0;
 
-  // Top products by sales quantity
   const topProducts = await SalesOrder.aggregate([
     { $match: { status: { $nin: ['Cancelled'] } } },
     { $unwind: '$items' },
@@ -37,7 +124,6 @@ exports.getInsights = asyncHandler(async (req, res) => {
     { $limit: 5 },
   ]);
 
-  // Top customers by order value
   const topCustomers = await SalesOrder.aggregate([
     { $match: { status: { $nin: ['Cancelled'] } } },
     { $group: { _id: '$customer', totalSpent: { $sum: '$totalPrice' }, orderCount: { $sum: 1 } } },
@@ -48,19 +134,16 @@ exports.getInsights = asyncHandler(async (req, res) => {
     { $project: { name: '$info.name', email: '$info.email', totalSpent: 1, orderCount: 1 } },
   ]);
 
-  // Low stock products
-  const lowStock = await Product.find({ $expr: { $lte: ['$stock', '$lowStockThreshold'] } })
-    .select('title sku stock lowStockThreshold')
+  const lowStock = await Product.find({ $expr: { $lte: ['$stock', '$reorderLevel'] } })
+    .select('title sku stock reorderLevel')
     .sort({ stock: 1 })
     .limit(10);
 
-  // Overdue invoices
   const overdueInvoices = await Invoice.countDocuments({
     status: { $in: ['Unpaid', 'Overdue'] },
     dueDate: { $lt: now },
   });
 
-  // Expense trend
   let expenseData = [];
   try {
     expenseData = await Expense.aggregate([
@@ -70,7 +153,6 @@ exports.getInsights = asyncHandler(async (req, res) => {
   } catch (e) { /* Expense model may not exist yet */ }
   const recentExpenses = expenseData[0]?.total || 0;
 
-  // Generate natural language insights
   const insights = [];
 
   if (revChange > 0) {
@@ -113,16 +195,48 @@ exports.getInsights = asyncHandler(async (req, res) => {
   });
 });
 
-// ──────────── SMART CHATBOT ────────────
+// ──────────── SMART CHATBOT (GEMINI AI + FALLBACK) ────────────
 exports.chat = asyncHandler(async (req, res) => {
   const { message } = req.body;
   if (!message) return res.json({ success: true, data: { reply: 'Please ask me a question about your business data.' } });
 
+  const geminiModel = initGemini();
+
+  // Try Gemini AI first
+  if (geminiModel) {
+    try {
+      const context = await getBusinessContext();
+      const systemPrompt = `You are an AI business assistant for an ERP Management System. Answer questions about the business using ONLY the data provided below. Be concise, helpful, and use specific numbers. Format currency as $X,XXX. If you don't have data to answer, say so.
+
+BUSINESS DATA:
+- Active Products: ${context.productCount}
+- Active Customers: ${context.customerCount}
+- Active Suppliers: ${context.supplierCount}
+- Low Stock Items: ${context.lowStockCount}
+- Overdue Invoices: ${context.overdueInvoices}
+- This Month Revenue: $${context.thisMonthRevenue.toLocaleString()} from ${context.thisMonthOrders} orders
+- All-Time Revenue: $${context.allTimeRevenue.toLocaleString()} from ${context.allTimeOrders} orders
+- This Month Expenses: $${context.thisMonthExpenses.toLocaleString()}
+- Orders by Status: ${JSON.stringify(context.ordersByStatus)}
+- Top Products: ${context.topProducts.join(', ') || 'No data'}
+- Top Customers: ${context.topCustomers.join(', ') || 'No data'}
+- Low Stock Products: ${context.lowStockProducts.join('; ') || 'All stocked'}
+
+USER QUESTION: ${message}`;
+
+      const result = await geminiModel.generateContent(systemPrompt);
+      const reply = result.response.text();
+      return res.json({ success: true, data: { reply } });
+    } catch (err) {
+      console.error('Gemini AI error, falling back to keyword system:', err.message);
+    }
+  }
+
+  // Fallback: keyword-based system
   const msg = message.toLowerCase().trim();
   let reply = '';
 
   try {
-    // Revenue queries
     if (msg.includes('revenue') || msg.includes('sales total') || msg.includes('how much')) {
       if (msg.includes('today')) {
         const start = new Date(); start.setHours(0,0,0,0);
@@ -146,20 +260,18 @@ exports.chat = asyncHandler(async (req, res) => {
         reply = result ? `Total all-time revenue: $${result.total.toLocaleString()} from ${result.count} order(s).` : 'No sales data found.';
       }
     }
-    // Products
     else if (msg.includes('how many products') || msg.includes('total products') || msg.includes('product count')) {
       const count = await Product.countDocuments();
       reply = `You have ${count} product(s) in the system.`;
     }
     else if (msg.includes('low stock') || msg.includes('out of stock') || msg.includes('restock') || msg.includes('reorder')) {
-      const products = await Product.find({ $expr: { $lte: ['$stock', '$lowStockThreshold'] } }).select('title stock lowStockThreshold').sort({ stock: 1 }).limit(10);
+      const products = await Product.find({ $expr: { $lte: ['$stock', '$reorderLevel'] } }).select('title stock reorderLevel').sort({ stock: 1 }).limit(10);
       if (products.length === 0) {
         reply = 'All products are well-stocked. No reorder needed.';
       } else {
-        reply = `${products.length} product(s) need restocking:\n` + products.map(p => `• ${p.title}: ${p.stock} left (threshold: ${p.lowStockThreshold})`).join('\n');
+        reply = `${products.length} product(s) need restocking:\n` + products.map(p => `- ${p.title}: ${p.stock} left (threshold: ${p.reorderLevel})`).join('\n');
       }
     }
-    // Top/best products
     else if (msg.includes('top product') || msg.includes('best sell') || msg.includes('best product') || msg.includes('popular product')) {
       const top = await SalesOrder.aggregate([
         { $match: { status: { $nin: ['Cancelled'] } } },
@@ -174,7 +286,6 @@ exports.chat = asyncHandler(async (req, res) => {
         reply = 'Top products by revenue:\n' + top.map((p, i) => `${i+1}. ${p.name}: $${p.totalRev.toLocaleString()} (${p.totalQty} sold)`).join('\n');
       }
     }
-    // Customers
     else if (msg.includes('how many customer') || msg.includes('total customer') || msg.includes('customer count')) {
       const count = await Customer.countDocuments();
       reply = `You have ${count} customer(s) in the system.`;
@@ -195,12 +306,10 @@ exports.chat = asyncHandler(async (req, res) => {
         reply = 'Top customers by spending:\n' + top.map((c, i) => `${i+1}. ${c.name}: $${c.totalSpent.toLocaleString()} (${c.orderCount} orders)`).join('\n');
       }
     }
-    // Suppliers
     else if (msg.includes('how many supplier') || msg.includes('total supplier') || msg.includes('supplier count')) {
       const count = await Supplier.countDocuments();
       reply = `You have ${count} supplier(s) in the system.`;
     }
-    // Invoices
     else if (msg.includes('overdue') || msg.includes('unpaid invoice') || msg.includes('pending invoice') || msg.includes('outstanding')) {
       const overdue = await Invoice.find({ status: { $in: ['Unpaid', 'Overdue'] } })
         .populate('customer', 'name')
@@ -209,23 +318,21 @@ exports.chat = asyncHandler(async (req, res) => {
       if (overdue.length === 0) {
         reply = 'No overdue or unpaid invoices. All payments are up to date!';
       } else {
-        const total = overdue.reduce((s, i) => s + (i.totalAmount || i.totalPrice || 0), 0);
-        reply = `${overdue.length} unpaid/overdue invoice(s) totaling $${total.toLocaleString()}:\n` + overdue.map(i => `• ${i.invoiceNumber}: $${(i.totalAmount || i.totalPrice || 0).toLocaleString()} - ${i.customer?.name || 'Unknown'}`).join('\n');
+        const total = overdue.reduce((s, i) => s + (i.total || 0), 0);
+        reply = `${overdue.length} unpaid/overdue invoice(s) totaling $${total.toLocaleString()}:\n` + overdue.map(i => `- ${i.invoiceNumber}: $${(i.total || 0).toLocaleString()} - ${i.customer?.name || 'Unknown'}`).join('\n');
       }
     }
-    // Orders
     else if (msg.includes('pending order') || msg.includes('draft order') || msg.includes('open order')) {
       const drafts = await SalesOrder.countDocuments({ status: 'Draft' });
       const confirmed = await SalesOrder.countDocuments({ status: 'Confirmed' });
       const shipped = await SalesOrder.countDocuments({ status: 'Shipped' });
-      reply = `Order status breakdown:\n• Draft: ${drafts}\n• Confirmed: ${confirmed}\n• Shipped: ${shipped}`;
+      reply = `Order status breakdown:\n- Draft: ${drafts}\n- Confirmed: ${confirmed}\n- Shipped: ${shipped}`;
     }
     else if (msg.includes('how many order') || msg.includes('total order') || msg.includes('order count')) {
       const sales = await SalesOrder.countDocuments();
       const purchase = await PurchaseOrder.countDocuments();
       reply = `Total orders: ${sales} sales order(s) and ${purchase} purchase order(s).`;
     }
-    // Expenses
     else if (msg.includes('expense') || msg.includes('spending') || msg.includes('cost')) {
       try {
         const thisMonth = new Date(); thisMonth.setDate(1); thisMonth.setHours(0,0,0,0);
@@ -238,7 +345,6 @@ exports.chat = asyncHandler(async (req, res) => {
         reply = 'Expense tracking is available. Start recording expenses to see data here.';
       }
     }
-    // Summary / overview
     else if (msg.includes('summary') || msg.includes('overview') || msg.includes('how is business') || msg.includes('status')) {
       const products = await Product.countDocuments();
       const customers = await Customer.countDocuments();
@@ -247,16 +353,14 @@ exports.chat = asyncHandler(async (req, res) => {
         { $match: { status: { $nin: ['Cancelled'] } } },
         { $group: { _id: null, total: { $sum: '$totalPrice' } } },
       ]);
-      const lowStock = await Product.countDocuments({ $expr: { $lte: ['$stock', '$lowStockThreshold'] } });
-      reply = `Business Overview:\n• Products: ${products}\n• Customers: ${customers}\n• Sales Orders: ${salesOrders}\n• Total Revenue: $${(rev?.total || 0).toLocaleString()}\n• Low Stock Items: ${lowStock}`;
+      const lowStock = await Product.countDocuments({ $expr: { $lte: ['$stock', '$reorderLevel'] } });
+      reply = `Business Overview:\n- Products: ${products}\n- Customers: ${customers}\n- Sales Orders: ${salesOrders}\n- Total Revenue: $${(rev?.total || 0).toLocaleString()}\n- Low Stock Items: ${lowStock}`;
     }
-    // Help
     else if (msg.includes('help') || msg.includes('what can you') || msg.includes('what do you')) {
-      reply = `I can help you with:\n• Revenue queries ("What's this month's revenue?")\n• Product info ("How many products?", "Low stock items")\n• Top products/customers ("Top selling products")\n• Invoice status ("Overdue invoices")\n• Order counts ("How many orders?")\n• Expense tracking ("Monthly expenses")\n• Business summary ("Give me an overview")`;
+      reply = `I can help you with:\n- Revenue queries ("What's this month's revenue?")\n- Product info ("How many products?", "Low stock items")\n- Top products/customers ("Top selling products")\n- Invoice status ("Overdue invoices")\n- Order counts ("How many orders?")\n- Expense tracking ("Monthly expenses")\n- Business summary ("Give me an overview")\n\nWith AI enabled, I can answer more complex and natural language questions!`;
     }
-    // Default
     else {
-      reply = `I'm not sure how to answer that. Try asking about:\n• Revenue (today/this month/total)\n• Products (count, low stock, top selling)\n• Customers (count, top customers)\n• Orders (count, pending, status)\n• Invoices (overdue, unpaid)\n• Expenses (monthly spending)\n• Business summary/overview\n\nOr type "help" for the full list.`;
+      reply = `I'm not sure how to answer that. Try asking about:\n- Revenue (today/this month/total)\n- Products (count, low stock, top selling)\n- Customers (count, top customers)\n- Orders (count, pending, status)\n- Invoices (overdue, unpaid)\n- Expenses (monthly spending)\n- Business summary/overview\n\nOr type "help" for the full list.`;
     }
   } catch (err) {
     reply = 'Sorry, I encountered an error processing your query. Please try again.';
@@ -267,12 +371,10 @@ exports.chat = asyncHandler(async (req, res) => {
 
 // ──────────── SMART REORDER SUGGESTIONS ────────────
 exports.getReorderSuggestions = asyncHandler(async (req, res) => {
-  // Get products at or below reorder level
   const lowStockProducts = await Product.find({
-    $expr: { $lte: ['$stock', '$lowStockThreshold'] },
-  }).select('title sku stock lowStockThreshold price category');
+    $expr: { $lte: ['$stock', '$reorderLevel'] },
+  }).select('title sku stock reorderLevel price category');
 
-  // For each low stock product, calculate average monthly consumption
   const suggestions = [];
   for (const product of lowStockProducts) {
     const sixMonthsAgo = new Date();
@@ -288,9 +390,8 @@ exports.getReorderSuggestions = asyncHandler(async (req, res) => {
     const totalSold = salesData[0]?.totalSold || 0;
     const avgMonthly = Math.ceil(totalSold / 6);
     const daysOfStock = avgMonthly > 0 ? Math.floor((product.stock / avgMonthly) * 30) : product.stock > 0 ? 999 : 0;
-    const suggestedQty = Math.max(avgMonthly * 2, product.lowStockThreshold * 2) - product.stock;
+    const suggestedQty = Math.max(avgMonthly * 2, product.reorderLevel * 2) - product.stock;
 
-    // Find preferred supplier (from recent purchase orders)
     const recentPO = await PurchaseOrder.findOne({ 'items.product': product._id })
       .populate('supplier', 'name')
       .sort({ createdAt: -1 });
@@ -298,7 +399,7 @@ exports.getReorderSuggestions = asyncHandler(async (req, res) => {
     suggestions.push({
       product: { _id: product._id, title: product.title, sku: product.sku, category: product.category },
       currentStock: product.stock,
-      threshold: product.lowStockThreshold,
+      threshold: product.reorderLevel,
       avgMonthlySales: avgMonthly,
       daysOfStockLeft: daysOfStock,
       suggestedOrderQty: Math.max(suggestedQty, 1),
@@ -308,7 +409,6 @@ exports.getReorderSuggestions = asyncHandler(async (req, res) => {
     });
   }
 
-  // Sort by urgency
   const urgencyOrder = { Critical: 0, High: 1, Medium: 2, Low: 3 };
   suggestions.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
 
@@ -322,7 +422,6 @@ exports.getAnomalies = asyncHandler(async (req, res) => {
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
 
-  // 1. Unusual order values (orders > 2x average)
   const [avgOrder] = await SalesOrder.aggregate([
     { $match: { status: { $nin: ['Cancelled'] } } },
     { $group: { _id: null, avg: { $avg: '$totalPrice' }, stdDev: { $stdDevPop: '$totalPrice' } } },
@@ -347,7 +446,6 @@ exports.getAnomalies = asyncHandler(async (req, res) => {
     }
   }
 
-  // 2. Sudden sales drop (this month < 50% of last month)
   const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
@@ -374,7 +472,6 @@ exports.getAnomalies = asyncHandler(async (req, res) => {
     }
   }
 
-  // 3. Products with zero sales in 30 days but had sales before
   const recentlySold = await SalesOrder.aggregate([
     { $match: { createdAt: { $gte: thirtyDaysAgo }, status: { $nin: ['Cancelled'] } } },
     { $unwind: '$items' },
@@ -402,7 +499,6 @@ exports.getAnomalies = asyncHandler(async (req, res) => {
     }
   }
 
-  // 4. High discount orders
   const highDiscount = await SalesOrder.find({
     createdAt: { $gte: thirtyDaysAgo },
     discountType: { $ne: 'none' },
@@ -422,7 +518,6 @@ exports.getAnomalies = asyncHandler(async (req, res) => {
     });
   }
 
-  // Sort by severity
   const sevOrder = { high: 0, medium: 1, low: 2 };
   anomalies.sort((a, b) => sevOrder[a.severity] - sevOrder[b.severity]);
 

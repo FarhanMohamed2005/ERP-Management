@@ -1,7 +1,10 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
+import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './layouts/MainLayout';
 import Dashboard from './pages/Dashboard';
@@ -22,57 +25,69 @@ import SupplierDetail from './pages/SupplierDetail';
 import CreditNotes from './pages/CreditNotes';
 import Quotations from './pages/Quotations';
 import Expenses from './pages/Expenses';
+import Settings from './pages/Settings';
 import NotFound from './pages/NotFound';
 
 function App() {
   const { isAuthenticated } = useSelector((state) => state.auth);
 
   return (
-    <Routes>
-      {/* Public routes */}
-      <Route
-        path="/login"
-        element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />}
-      />
-      <Route
-        path="/register"
-        element={!isAuthenticated ? <Register /> : <Navigate to="/dashboard" />}
-      />
+    <ErrorBoundary>
+      <Routes>
+        {/* Public routes */}
+        <Route
+          path="/login"
+          element={!isAuthenticated ? <Login /> : <Navigate to="/dashboard" />}
+        />
+        <Route
+          path="/register"
+          element={!isAuthenticated ? <Register /> : <Navigate to="/dashboard" />}
+        />
+        <Route
+          path="/forgot-password"
+          element={!isAuthenticated ? <ForgotPassword /> : <Navigate to="/dashboard" />}
+        />
+        <Route
+          path="/reset-password/:token"
+          element={!isAuthenticated ? <ResetPassword /> : <Navigate to="/dashboard" />}
+        />
 
-      {/* Protected routes */}
-      <Route element={<ProtectedRoute />}>
-        <Route element={<MainLayout />}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/products" element={<Products />} />
-          <Route path="/customers" element={<Customers />} />
-          <Route path="/customers/:id" element={<CustomerDetail />} />
-          <Route path="/suppliers" element={<Suppliers />} />
-          <Route path="/suppliers/:id" element={<SupplierDetail />} />
-          <Route path="/sales-orders" element={<SalesOrders />} />
-          <Route path="/purchase-orders" element={<PurchaseOrders />} />
-          <Route path="/grn" element={<GoodsReceipt />} />
-          <Route path="/invoices" element={<Invoices />} />
-          <Route path="/credit-notes" element={<CreditNotes />} />
-          <Route path="/quotations" element={<Quotations />} />
-          <Route path="/expenses" element={<Expenses />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/low-stock" element={<LowStockAlerts />} />
-          <Route path="/activity-log" element={<ActivityLog />} />
-          <Route path="/profile" element={<Profile />} />
+        {/* Protected routes */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<MainLayout />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/products" element={<Products />} />
+            <Route path="/customers" element={<Customers />} />
+            <Route path="/customers/:id" element={<CustomerDetail />} />
+            <Route path="/suppliers" element={<Suppliers />} />
+            <Route path="/suppliers/:id" element={<SupplierDetail />} />
+            <Route path="/sales-orders" element={<SalesOrders />} />
+            <Route path="/purchase-orders" element={<PurchaseOrders />} />
+            <Route path="/grn" element={<GoodsReceipt />} />
+            <Route path="/invoices" element={<Invoices />} />
+            <Route path="/credit-notes" element={<CreditNotes />} />
+            <Route path="/quotations" element={<Quotations />} />
+            <Route path="/expenses" element={<Expenses />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/low-stock" element={<LowStockAlerts />} />
+            <Route path="/activity-log" element={<ActivityLog />} />
+            <Route path="/profile" element={<Profile />} />
+          </Route>
         </Route>
-      </Route>
 
-      {/* Admin-only routes */}
-      <Route element={<ProtectedRoute allowedRoles={['Admin']} />}>
-        <Route element={<MainLayout />}>
-          <Route path="/users" element={<Users />} />
+        {/* Admin-only routes */}
+        <Route element={<ProtectedRoute allowedRoles={['Admin']} />}>
+          <Route element={<MainLayout />}>
+            <Route path="/users" element={<Users />} />
+            <Route path="/settings" element={<Settings />} />
+          </Route>
         </Route>
-      </Route>
 
-      {/* Catch-all */}
-      <Route path="/" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+        {/* Catch-all */}
+        <Route path="/" element={<Navigate to={isAuthenticated ? '/dashboard' : '/login'} />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </ErrorBoundary>
   );
 }
 

@@ -92,3 +92,14 @@ exports.updateInvoice = asyncHandler(async (req, res) => {
   }
   res.json({ success: true, message: 'Invoice updated successfully', data: populated });
 });
+
+exports.deleteInvoice = asyncHandler(async (req, res) => {
+  const invoice = await Invoice.findById(req.params.id);
+  if (!invoice) throw new ApiError(404, 'Invoice not found');
+  if (!['Unpaid', 'Cancelled'].includes(invoice.status)) {
+    throw new ApiError(400, 'Only unpaid or cancelled invoices can be deleted');
+  }
+  await Invoice.findByIdAndDelete(req.params.id);
+  logActivity({ user: req.user, action: 'delete', entity: 'Invoice', entityId: invoice._id, description: `Deleted invoice "${invoice.invoiceNumber}"` });
+  res.json({ success: true, message: 'Invoice deleted successfully' });
+});

@@ -67,4 +67,8 @@ quotationSchema.pre('save', async function (next) {
   next();
 });
 
+quotationSchema.index({ quoteNumber: 1 });
+quotationSchema.index({ customer: 1, createdAt: -1 });
+quotationSchema.index({ status: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Quotation', quotationSchema);

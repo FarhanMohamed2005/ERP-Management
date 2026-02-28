@@ -75,3 +75,11 @@ exports.createGRN = asyncHandler(async (req, res) => {
   logActivity({ user: req.user, action: 'create', entity: 'GRN', entityId: grn._id, description: `Created GRN "${grn.grnNumber}"` });
   res.status(201).json({ success: true, message: 'Goods receipt created and stock updated', data: populated });
 });
+
+exports.deleteGRN = asyncHandler(async (req, res) => {
+  const grn = await GRN.findById(req.params.id);
+  if (!grn) throw new ApiError(404, 'GRN not found');
+  await GRN.findByIdAndDelete(req.params.id);
+  logActivity({ user: req.user, action: 'delete', entity: 'GRN', entityId: grn._id, description: `Deleted GRN "${grn.grnNumber}"` });
+  res.json({ success: true, message: 'GRN deleted successfully' });
+});

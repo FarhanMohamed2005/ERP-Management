@@ -40,4 +40,7 @@ const supplierSchema = new mongoose.Schema(
   }
 );
 
+supplierSchema.index({ name: 'text', email: 'text' });
+supplierSchema.index({ isActive: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Supplier', supplierSchema);

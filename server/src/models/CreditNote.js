@@ -40,4 +40,8 @@ creditNoteSchema.pre('save', async function (next) {
   next();
 });
 
+creditNoteSchema.index({ creditNoteNumber: 1 });
+creditNoteSchema.index({ customer: 1, createdAt: -1 });
+creditNoteSchema.index({ status: 1, createdAt: -1 });
+
 module.exports = mongoose.model('CreditNote', creditNoteSchema);

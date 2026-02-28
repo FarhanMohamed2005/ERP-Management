@@ -42,4 +42,8 @@ grnSchema.pre('save', async function (next) {
   next();
 });
 
+grnSchema.index({ grnNumber: 1 });
+grnSchema.index({ purchaseOrder: 1 });
+grnSchema.index({ receivedDate: -1 });
+
 module.exports = mongoose.model('GRN', grnSchema);

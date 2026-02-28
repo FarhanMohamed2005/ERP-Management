@@ -144,3 +144,14 @@ exports.updateCreditNote = asyncHandler(async (req, res) => {
     data: populated,
   });
 });
+
+exports.deleteCreditNote = asyncHandler(async (req, res) => {
+  const creditNote = await CreditNote.findById(req.params.id);
+  if (!creditNote) throw new ApiError(404, 'Credit note not found');
+  if (!['Draft', 'Cancelled'].includes(creditNote.status)) {
+    throw new ApiError(400, 'Only draft or cancelled credit notes can be deleted');
+  }
+  await CreditNote.findByIdAndDelete(req.params.id);
+  logActivity({ user: req.user, action: 'delete', entity: 'CreditNote', entityId: creditNote._id, description: `Deleted credit note "${creditNote.creditNoteNumber}"` });
+  res.json({ success: true, message: 'Credit note deleted successfully' });
+});

@@ -4,6 +4,7 @@ const {
   getCreditNote,
   createCreditNote,
   updateCreditNote,
+  deleteCreditNote,
 } = require('../controllers/creditNoteController');
 const auth = require('../middleware/auth');
 const authorize = require('../middleware/authorize');
@@ -18,6 +19,7 @@ router
 router
   .route('/:id')
   .get(getCreditNote)
-  .put(authorize('Admin', 'Sales'), updateCreditNote);
+  .put(authorize('Admin', 'Sales'), updateCreditNote)
+  .delete(authorize('Admin'), deleteCreditNote);
 
 module.exports = router;

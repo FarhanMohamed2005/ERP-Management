@@ -53,4 +53,9 @@ invoiceSchema.pre('save', async function (next) {
   next();
 });
 
+invoiceSchema.index({ invoiceNumber: 1 });
+invoiceSchema.index({ customer: 1, createdAt: -1 });
+invoiceSchema.index({ status: 1, createdAt: -1 });
+invoiceSchema.index({ status: 1, dueDate: 1 });
+
 module.exports = mongoose.model('Invoice', invoiceSchema);

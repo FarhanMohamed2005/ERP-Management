@@ -1,9 +1,6 @@
 import { useState } from 'react';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
-import { useDispatch, useSelector } from 'react-redux';
-import { useForm } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import * as yup from 'yup';
+import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
+import { useDispatch } from 'react-redux';
 import {
   Box,
   Card,
@@ -20,46 +17,38 @@ import {
 import {
   Visibility,
   VisibilityOff,
-  Email as EmailIcon,
   Lock as LockIcon,
+  ArrowBack,
 } from '@mui/icons-material';
 import { toast } from 'react-toastify';
 import api from '../api/axios';
-import { loginStart, loginSuccess, loginFailure } from '../store/slices/authSlice';
+import { loginSuccess } from '../store/slices/authSlice';
 
-const schema = yup.object({
-  email: yup.string().email('Enter a valid email').required('Email is required'),
-  password: yup.string().required('Password is required'),
-});
-
-const Login = () => {
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
-  const dispatch = useDispatch();
+const ResetPassword = () => {
+  const { token } = useParams();
   const navigate = useNavigate();
-  const { loading } = useSelector((state) => state.auth);
+  const dispatch = useDispatch();
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm({
-    resolver: yupResolver(schema),
-    defaultValues: { email: '', password: '' },
-  });
-
-  const onSubmit = async (data) => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!password || password.length < 6) return setError('Password must be at least 6 characters');
+    if (password !== confirmPassword) return setError('Passwords do not match');
     setError('');
-    dispatch(loginStart());
+    setLoading(true);
     try {
-      const res = await api.post('/auth/login', data);
+      const res = await api.post(`/auth/reset-password/${token}`, { password });
       dispatch(loginSuccess({ user: res.data.user, token: res.data.token }));
-      toast.success(`Welcome back, ${res.data.user.name}`);
+      toast.success('Password reset successful!');
       navigate('/dashboard');
     } catch (err) {
-      dispatch(loginFailure());
-      const msg = err.response?.data?.message || 'Login failed. Please try again.';
-      setError(msg);
+      setError(err.response?.data?.message || 'Failed to reset password. The link may have expired.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -75,7 +64,6 @@ const Login = () => {
       }}
     >
       <Box sx={{ width: '100%', maxWidth: 440 }}>
-        {/* Logo / Brand */}
         <Box sx={{ textAlign: 'center', mb: 4 }}>
           <Box
             sx={{
@@ -94,10 +82,10 @@ const Login = () => {
             </Typography>
           </Box>
           <Typography variant="h2" gutterBottom>
-            Welcome back
+            Reset Password
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            Sign in to your ERP account to continue
+            Enter your new password below
           </Typography>
         </Box>
 
@@ -108,35 +96,13 @@ const Login = () => {
                 {error}
               </Alert>
             )}
-
-            <form onSubmit={handleSubmit(onSubmit)} noValidate>
+            <form onSubmit={handleSubmit} noValidate>
               <TextField
                 fullWidth
-                label="Email address"
-                type="email"
-                autoComplete="email"
-                autoFocus
-                {...register('email')}
-                error={!!errors.email}
-                helperText={errors.email?.message}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <EmailIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ mb: 2.5 }}
-              />
-
-              <TextField
-                fullWidth
-                label="Password"
+                label="New Password"
                 type={showPassword ? 'text' : 'password'}
-                autoComplete="current-password"
-                {...register('password')}
-                error={!!errors.password}
-                helperText={errors.password?.message}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
@@ -145,25 +111,29 @@ const Login = () => {
                   ),
                   endAdornment: (
                     <InputAdornment position="end">
-                      <IconButton
-                        onClick={() => setShowPassword(!showPassword)}
-                        edge="end"
-                        size="small"
-                      >
+                      <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" size="small">
                         {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                       </IconButton>
                     </InputAdornment>
                   ),
                 }}
-                sx={{ mb: 1.5 }}
+                sx={{ mb: 2.5 }}
               />
-
-              <Box sx={{ textAlign: 'right', mb: 2 }}>
-                <Link component={RouterLink} to="/forgot-password" underline="hover" variant="body2" color="primary">
-                  Forgot your password?
-                </Link>
-              </Box>
-
+              <TextField
+                fullWidth
+                label="Confirm Password"
+                type={showPassword ? 'text' : 'password'}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <LockIcon sx={{ color: 'text.disabled', fontSize: 20 }} />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ mb: 3 }}
+              />
               <Button
                 type="submit"
                 variant="contained"
@@ -172,16 +142,15 @@ const Login = () => {
                 disabled={loading}
                 sx={{ py: 1.4 }}
               >
-                {loading ? <CircularProgress size={24} color="inherit" /> : 'Sign in'}
+                {loading ? <CircularProgress size={24} color="inherit" /> : 'Reset Password'}
               </Button>
             </form>
           </CardContent>
         </Card>
 
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 3 }}>
-          Don't have an account?{' '}
-          <Link component={RouterLink} to="/register" underline="hover" fontWeight={600}>
-            Create account
+          <Link component={RouterLink} to="/login" underline="hover" fontWeight={600} sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+            <ArrowBack sx={{ fontSize: 16 }} /> Back to Sign in
           </Link>
         </Typography>
       </Box>
@@ -189,4 +158,4 @@ const Login = () => {
   );
 };
 
-export default Login;
+export default ResetPassword;

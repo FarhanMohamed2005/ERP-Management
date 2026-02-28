@@ -40,4 +40,7 @@ const customerSchema = new mongoose.Schema(
   }
 );
 
+customerSchema.index({ name: 'text', email: 'text' });
+customerSchema.index({ isActive: 1, createdAt: -1 });
+
 module.exports = mongoose.model('Customer', customerSchema);

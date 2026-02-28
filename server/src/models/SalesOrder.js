@@ -77,4 +77,8 @@ salesOrderSchema.pre('save', async function (next) {
   next();
 });
 
+salesOrderSchema.index({ orderNumber: 1 });
+salesOrderSchema.index({ customer: 1, createdAt: -1 });
+salesOrderSchema.index({ status: 1, createdAt: -1 });
+
 module.exports = mongoose.model('SalesOrder', salesOrderSchema);
