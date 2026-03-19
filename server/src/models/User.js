@@ -68,6 +68,9 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.index({ role: 1, isActive: 1 });
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ createdAt: -1 });
+userSchema.index({ lastLoginAt: -1 });
 
 // Hash password before saving
 userSchema.pre('save', async function (next) {

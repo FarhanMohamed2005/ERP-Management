@@ -12,31 +12,69 @@ const app = express();
 
 connectDB();
 
-// Security middleware
-app.use(helmet());
+// Security middleware - Enhanced Helmet configuration
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'", 'https://generativelanguage.googleapis.com'],
+    },
+  },
+  hsts: {
+    maxAge: 31536000, // 1 year in seconds
+    includeSubDomains: true,
+    preload: true,
+  },
+  frameguard: {
+    action: 'deny',
+  },
+  noSniff: true,
+  xssFilter: true,
+}));
+
+// HTTPS redirect for production
+if (config.isProduction) {
+  app.use((req, res, next) => {
+    if (req.header('x-forwarded-proto') !== 'https') {
+      res.redirect(`https://${req.header('host')}${req.url}`);
+    } else {
+      next();
+    }
+  });
+}
+
 app.use(mongoSanitize());
 app.use(cors({
-  origin: config.corsOrigins || ['http://localhost:5173', 'http://localhost:3000'],
+  origin: config.corsOrigins,
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
 
-// Rate limiting
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Rate limiting configuration
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: config.isProduction ? 100 : 200,
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => config.nodeEnv === 'test',
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 10,
   message: { success: false, message: 'Too many login attempts, please try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
 });
 
 app.use('/api/', apiLimiter);
@@ -45,11 +83,28 @@ app.use('/api/auth/register', authLimiter);
 
 if (config.nodeEnv === 'development') {
   app.use(morgan('dev'));
+} else if (config.nodeEnv === 'production') {
+  app.use(morgan('combined'));
 }
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'ERP API is running', timestamp: new Date().toISOString() });
+// Health check with database connectivity
+app.get('/api/health', async (req, res) => {
+  try {
+    const mongoHealthy = require('mongoose').connection.readyState === 1;
+    res.json({
+      success: true,
+      message: 'ERP API is running',
+      timestamp: new Date().toISOString(),
+      database: mongoHealthy ? 'connected' : 'disconnected',
+      environment: config.nodeEnv,
+    });
+  } catch (err) {
+    res.status(503).json({
+      success: false,
+      message: 'Service unavailable',
+      database: 'disconnected',
+    });
+  }
 });
 
 // API Routes

@@ -7,15 +7,24 @@ const Invoice = require('../models/Invoice');
 const Expense = require('../models/Expense');
 const asyncHandler = require('../utils/asyncHandler');
 const config = require('../config');
+const ApiError = require('../utils/ApiError');
 
 let genAI = null;
 let model = null;
+let geminiModelName = 'gemini-2.0-flash';
+
+const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-pro'];
 
 const initGemini = () => {
-  if (!genAI && config.geminiApiKey) {
+  if (!config.geminiApiKey) return null;
+  if (model) return model;
+  try {
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     genAI = new GoogleGenerativeAI(config.geminiApiKey);
-    model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    model = genAI.getGenerativeModel({ model: geminiModelName });
+    console.log(`Gemini AI initialized with model: ${geminiModelName}`);
+  } catch (err) {
+    console.error('Failed to initialize Gemini AI:', err.message);
   }
   return model;
 };
@@ -204,9 +213,8 @@ exports.chat = asyncHandler(async (req, res) => {
 
   // Try Gemini AI first
   if (geminiModel) {
-    try {
-      const context = await getBusinessContext();
-      const systemPrompt = `You are an AI business assistant for an ERP Management System. Answer questions about the business using ONLY the data provided below. Be concise, helpful, and use specific numbers. Format currency as $X,XXX. If you don't have data to answer, say so.
+    const context = await getBusinessContext();
+    const systemPrompt = `You are an AI business assistant for an ERP Management System. Answer questions about the business using ONLY the data provided below. Be concise, helpful, and use specific numbers. Format currency as $X,XXX. If you don't have data to answer, say so.
 
 BUSINESS DATA:
 - Active Products: ${context.productCount}
@@ -224,12 +232,25 @@ BUSINESS DATA:
 
 USER QUESTION: ${message}`;
 
-      const result = await geminiModel.generateContent(systemPrompt);
-      const reply = result.response.text();
-      return res.json({ success: true, data: { reply } });
-    } catch (err) {
-      console.error('Gemini AI error, falling back to keyword system:', err.message);
+    for (const modelName of GEMINI_MODELS) {
+      try {
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const tempGenAI = new GoogleGenerativeAI(config.geminiApiKey);
+        const tempModel = tempGenAI.getGenerativeModel({ model: modelName });
+        const result = await tempModel.generateContent(systemPrompt);
+        const reply = result.response.text();
+        if (modelName !== geminiModelName) {
+          geminiModelName = modelName;
+          model = tempModel;
+          genAI = tempGenAI;
+          console.log(`Switched to Gemini model: ${modelName}`);
+        }
+        return res.json({ success: true, data: { reply } });
+      } catch (err) {
+        console.error(`Gemini model ${modelName} failed:`, err.message);
+      }
     }
+    console.error('All Gemini models failed, falling back to keyword system');
   }
 
   // Fallback: keyword-based system
@@ -522,4 +543,145 @@ exports.getAnomalies = asyncHandler(async (req, res) => {
   anomalies.sort((a, b) => sevOrder[a.severity] - sevOrder[b.severity]);
 
   res.json({ success: true, data: anomalies });
+});
+
+// ──────────── AI STATUS ────────────
+exports.getStatus = asyncHandler(async (req, res) => {
+  const hasApiKey = !!config.geminiApiKey;
+  let connected = false;
+  let currentModel = geminiModelName;
+
+  if (hasApiKey) {
+    try {
+      const geminiModel = initGemini();
+      if (geminiModel) {
+        const result = await geminiModel.generateContent('Say "OK" in one word.');
+        const text = result.response.text();
+        connected = !!text;
+      }
+    } catch (err) {
+      console.error('Gemini status check failed:', err.message);
+    }
+  }
+
+  res.json({
+    success: true,
+    data: {
+      hasApiKey,
+      connected,
+      currentModel,
+      availableModels: GEMINI_MODELS,
+    },
+  });
+});
+
+// ──────────── AI PRODUCT DESCRIPTION GENERATOR ────────────
+exports.generateDescription = asyncHandler(async (req, res) => {
+  const { title, category, price } = req.body;
+  if (!title) throw new ApiError('Product title is required', 400);
+
+  const geminiModel = initGemini();
+  if (!geminiModel) {
+    return res.json({
+      success: true,
+      data: {
+        description: `${title} - A quality ${category || 'product'} available at $${price || 'competitive pricing'}.`,
+        source: 'fallback',
+      },
+    });
+  }
+
+  try {
+    const prompt = `Write a short, professional product description (2-3 sentences) for an ERP product listing:
+Title: ${title}
+${category ? `Category: ${category}` : ''}
+${price ? `Price: $${price}` : ''}
+
+Be concise, professional, and highlight key selling points.`;
+
+    const result = await geminiModel.generateContent(prompt);
+    const description = result.response.text();
+    res.json({ success: true, data: { description, source: 'ai' } });
+  } catch (err) {
+    console.error('AI description generation failed:', err.message);
+    res.json({
+      success: true,
+      data: {
+        description: `${title} - A quality ${category || 'product'} available at $${price || 'competitive pricing'}.`,
+        source: 'fallback',
+      },
+    });
+  }
+});
+
+// ──────────── AI SALES FORECAST ────────────
+exports.getSalesForecast = asyncHandler(async (req, res) => {
+  const now = new Date();
+  const twelveMonthsAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+
+  const monthlySales = await SalesOrder.aggregate([
+    { $match: { createdAt: { $gte: twelveMonthsAgo }, status: { $nin: ['Cancelled'] } } },
+    {
+      $group: {
+        _id: { year: { $year: '$createdAt' }, month: { $month: '$createdAt' } },
+        revenue: { $sum: '$totalPrice' },
+        orders: { $sum: 1 },
+      },
+    },
+    { $sort: { '_id.year': 1, '_id.month': 1 } },
+  ]);
+
+  const geminiModel = initGemini();
+  if (geminiModel && monthlySales.length >= 3) {
+    try {
+      const salesSummary = monthlySales.map(m =>
+        `${m._id.year}-${String(m._id.month).padStart(2, '0')}: $${m.revenue.toLocaleString()} (${m.orders} orders)`
+      ).join('\n');
+
+      const prompt = `Based on the following monthly sales data, provide a brief 3-month sales forecast with projected revenue figures. Be specific with numbers and keep it concise.
+
+MONTHLY SALES DATA:
+${salesSummary}
+
+Provide the forecast as JSON with this structure:
+{ "forecast": [{ "month": "YYYY-MM", "projectedRevenue": number, "confidence": "high|medium|low" }], "summary": "brief analysis" }`;
+
+      const result = await geminiModel.generateContent(prompt);
+      const text = result.response.text();
+      try {
+        const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        const parsed = JSON.parse(cleaned);
+        return res.json({ success: true, data: { ...parsed, historicalData: monthlySales, source: 'ai' } });
+      } catch (parseErr) {
+        return res.json({ success: true, data: { summary: text, historicalData: monthlySales, source: 'ai' } });
+      }
+    } catch (err) {
+      console.error('AI forecast failed:', err.message);
+    }
+  }
+
+  // Fallback: simple average-based projection
+  const totalRevenue = monthlySales.reduce((sum, m) => sum + m.revenue, 0);
+  const avgRevenue = monthlySales.length > 0 ? Math.round(totalRevenue / monthlySales.length) : 0;
+  const forecast = [];
+  for (let i = 1; i <= 3; i++) {
+    const futureDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    forecast.push({
+      month: `${futureDate.getFullYear()}-${String(futureDate.getMonth() + 1).padStart(2, '0')}`,
+      projectedRevenue: avgRevenue,
+      confidence: 'low',
+    });
+  }
+
+  res.json({
+    success: true,
+    data: {
+      forecast,
+      summary: monthlySales.length > 0
+        ? `Based on ${monthlySales.length} month(s) of data, average monthly revenue is $${avgRevenue.toLocaleString()}.`
+        : 'No historical sales data available for forecasting.',
+      historicalData: monthlySales,
+      source: 'fallback',
+    },
+  });
 });

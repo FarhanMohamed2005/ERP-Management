@@ -2,6 +2,17 @@
 
 A full-stack Enterprise Resource Planning (ERP) system built with the MERN stack (MongoDB, Express.js, React, Node.js), featuring AI-powered business insights, a smart chatbot, and comprehensive business management modules.
 
+## ⚠️ **Important: Security & Deployment Documents**
+
+**Before deploying to production, read these documents:**
+
+1. **[SECURITY_AND_DEPLOYMENT.md](./SECURITY_AND_DEPLOYMENT.md)** - Security features, compliance, and checklist
+2. **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Step-by-step deployment instructions
+3. **[CREDENTIALS_AND_SECRETS.md](./CREDENTIALS_AND_SECRETS.md)** - Secrets management and best practices
+4. **[HANDOFF_CHECKLIST.md](./HANDOFF_CHECKLIST.md)** - Complete application verification
+
+⚠️ **Critical:** Change all default passwords immediately after first login. See **CREDENTIALS_AND_SECRETS.md** for details.
+
 ## Features
 
 ### Core Modules

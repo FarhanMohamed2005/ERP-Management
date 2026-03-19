@@ -57,5 +57,7 @@ invoiceSchema.index({ invoiceNumber: 1 });
 invoiceSchema.index({ customer: 1, createdAt: -1 });
 invoiceSchema.index({ status: 1, createdAt: -1 });
 invoiceSchema.index({ status: 1, dueDate: 1 });
+invoiceSchema.index({ salesOrder: 1 });
+invoiceSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Invoice', invoiceSchema);

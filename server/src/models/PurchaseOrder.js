@@ -53,5 +53,7 @@ purchaseOrderSchema.pre('save', async function (next) {
 purchaseOrderSchema.index({ orderNumber: 1 });
 purchaseOrderSchema.index({ supplier: 1, createdAt: -1 });
 purchaseOrderSchema.index({ status: 1, createdAt: -1 });
+purchaseOrderSchema.index({ createdAt: -1 });
+purchaseOrderSchema.index({ status: 1 });
 
 module.exports = mongoose.model('PurchaseOrder', purchaseOrderSchema);

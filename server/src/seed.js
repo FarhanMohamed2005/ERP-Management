@@ -40,14 +40,19 @@ const seed = async () => {
       users = await User.find({});
     } else {
       console.log('Creating users...');
+      console.log('\n⚠️  IMPORTANT: These are temporary demo accounts. Change all passwords immediately in production!\n');
       users = await User.create([
-        { name: 'System Admin', email: 'admin@erp.com', password: 'Admin@123', role: 'Admin', department: 'Management' },
-        { name: 'Sarah Johnson', email: 'sarah@erp.com', password: 'Sales@123', role: 'Sales', department: 'Sales' },
-        { name: 'Mike Chen', email: 'mike@erp.com', password: 'Purchase@123', role: 'Purchase', department: 'Procurement' },
-        { name: 'Lisa Park', email: 'lisa@erp.com', password: 'Inventory@123', role: 'Inventory', department: 'Warehouse' },
+        { name: 'System Admin', email: 'admin@erp.com', password: 'Admin@123456', role: 'Admin', department: 'Management' },
+        { name: 'Sarah Johnson', email: 'sarah@erp.com', password: 'Sales@123456', role: 'Sales', department: 'Sales' },
+        { name: 'Mike Chen', email: 'mike@erp.com', password: 'Purchase@123456', role: 'Purchase', department: 'Procurement' },
+        { name: 'Lisa Park', email: 'lisa@erp.com', password: 'Inventory@123456', role: 'Inventory', department: 'Warehouse' },
       ]);
       console.log(`  Created ${users.length} users`);
-    }
+      console.log('\n📝 DEFAULT CREDENTIALS (Change immediately):\n');
+      console.log('Admin (admin@erp.com): Admin@123456');
+      console.log('Sales (sarah@erp.com): Sales@123456');
+      console.log('Purchase (mike@erp.com): Purchase@123456');
+      console.log('Inventory (lisa@erp.com): Inventory@123456\n');
 
     const admin = users.find((u) => u.role === 'Admin') || users[0];
     const salesUser = users.find((u) => u.role === 'Sales') || admin;
@@ -150,18 +155,18 @@ const seed = async () => {
     } else {
       console.log('Creating products...');
       products = await Product.create([
-        { title: 'Wireless Keyboard', sku: 'KB-001', category: 'Electronics', price: 49.99, stock: 150, reorderLevel: 20, unit: 'pcs', description: 'Ergonomic wireless keyboard with backlit keys' },
-        { title: 'USB-C Hub Adapter', sku: 'HUB-002', category: 'Electronics', price: 34.99, stock: 200, reorderLevel: 30, unit: 'pcs', description: '7-in-1 USB-C hub with HDMI and ethernet' },
-        { title: 'Ergonomic Office Chair', sku: 'FRN-003', category: 'Furniture', price: 299.99, stock: 45, reorderLevel: 10, unit: 'pcs', description: 'Adjustable lumbar support office chair' },
-        { title: 'Standing Desk', sku: 'FRN-004', category: 'Furniture', price: 499.99, stock: 25, reorderLevel: 5, unit: 'pcs', description: 'Electric height-adjustable standing desk' },
-        { title: 'LED Monitor 27"', sku: 'MON-005', category: 'Electronics', price: 349.99, stock: 80, reorderLevel: 15, unit: 'pcs', description: '27 inch 4K IPS LED monitor' },
-        { title: 'Printer Paper A4', sku: 'SUP-006', category: 'Supplies', price: 8.99, stock: 500, reorderLevel: 100, unit: 'reams', description: 'A4 white printer paper, 500 sheets per ream' },
-        { title: 'Whiteboard Markers Set', sku: 'SUP-007', category: 'Supplies', price: 12.99, stock: 300, reorderLevel: 50, unit: 'sets', description: 'Assorted color dry-erase markers, 8-pack' },
-        { title: 'Laptop Stand', sku: 'ACC-008', category: 'Accessories', price: 59.99, stock: 120, reorderLevel: 25, unit: 'pcs', description: 'Aluminum adjustable laptop stand' },
-        { title: 'Noise-Cancelling Headset', sku: 'AUD-009', category: 'Electronics', price: 89.99, stock: 5, reorderLevel: 15, unit: 'pcs', description: 'Bluetooth ANC headset with microphone' },
-        { title: 'Webcam HD 1080p', sku: 'CAM-010', category: 'Electronics', price: 69.99, stock: 8, reorderLevel: 20, unit: 'pcs', description: 'Full HD webcam with auto-focus and built-in mic' },
-        { title: 'Desk Organizer', sku: 'SUP-011', category: 'Supplies', price: 24.99, stock: 200, reorderLevel: 30, unit: 'pcs', description: 'Multi-compartment desk organizer' },
-        { title: 'Network Switch 8-Port', sku: 'NET-012', category: 'Electronics', price: 45.99, stock: 60, reorderLevel: 10, unit: 'pcs', description: 'Gigabit ethernet 8-port switch' },
+        { title: 'Wireless Keyboard', sku: 'KB-001', category: 'Electronics', price: 49.99, stock: 150, reorderLevel: 20, unit: 'pcs', description: 'Ergonomic wireless keyboard with backlit keys', createdBy: admin._id },
+        { title: 'USB-C Hub Adapter', sku: 'HUB-002', category: 'Electronics', price: 34.99, stock: 200, reorderLevel: 30, unit: 'pcs', description: '7-in-1 USB-C hub with HDMI and ethernet', createdBy: admin._id },
+        { title: 'Ergonomic Office Chair', sku: 'FRN-003', category: 'Furniture', price: 299.99, stock: 45, reorderLevel: 10, unit: 'pcs', description: 'Adjustable lumbar support office chair', createdBy: admin._id },
+        { title: 'Standing Desk', sku: 'FRN-004', category: 'Furniture', price: 499.99, stock: 25, reorderLevel: 5, unit: 'pcs', description: 'Electric height-adjustable standing desk', createdBy: admin._id },
+        { title: 'LED Monitor 27"', sku: 'MON-005', category: 'Electronics', price: 349.99, stock: 80, reorderLevel: 15, unit: 'pcs', description: '27 inch 4K IPS LED monitor', createdBy: admin._id },
+        { title: 'Printer Paper A4', sku: 'SUP-006', category: 'Supplies', price: 8.99, stock: 500, reorderLevel: 100, unit: 'reams', description: 'A4 white printer paper, 500 sheets per ream', createdBy: admin._id },
+        { title: 'Whiteboard Markers Set', sku: 'SUP-007', category: 'Supplies', price: 12.99, stock: 300, reorderLevel: 50, unit: 'sets', description: 'Assorted color dry-erase markers, 8-pack', createdBy: admin._id },
+        { title: 'Laptop Stand', sku: 'ACC-008', category: 'Accessories', price: 59.99, stock: 120, reorderLevel: 25, unit: 'pcs', description: 'Aluminum adjustable laptop stand', createdBy: admin._id },
+        { title: 'Noise-Cancelling Headset', sku: 'AUD-009', category: 'Electronics', price: 89.99, stock: 5, reorderLevel: 15, unit: 'pcs', description: 'Bluetooth ANC headset with microphone', createdBy: admin._id },
+        { title: 'Webcam HD 1080p', sku: 'CAM-010', category: 'Electronics', price: 69.99, stock: 8, reorderLevel: 20, unit: 'pcs', description: 'Full HD webcam with auto-focus and built-in mic', createdBy: admin._id },
+        { title: 'Desk Organizer', sku: 'SUP-011', category: 'Supplies', price: 24.99, stock: 200, reorderLevel: 30, unit: 'pcs', description: 'Multi-compartment desk organizer', createdBy: admin._id },
+        { title: 'Network Switch 8-Port', sku: 'NET-012', category: 'Electronics', price: 45.99, stock: 60, reorderLevel: 10, unit: 'pcs', description: 'Gigabit ethernet 8-port switch', createdBy: admin._id },
       ]);
       console.log(`  Created ${products.length} products`);
     }

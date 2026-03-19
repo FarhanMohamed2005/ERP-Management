@@ -13,6 +13,11 @@ exports.getProducts = asyncHandler(async (req, res) => {
 
   const query = {};
 
+  // Non-admin users only see their own products
+  if (req.user.role !== 'Admin') {
+    query.createdBy = req.user._id;
+  }
+
   if (search) {
     query.$or = [
       { title: { $regex: search, $options: 'i' } },
@@ -30,6 +35,7 @@ exports.getProducts = asyncHandler(async (req, res) => {
 
   const total = await Product.countDocuments(query);
   const products = await Product.find(query)
+    .populate('createdBy', 'name')
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit);
@@ -48,10 +54,14 @@ exports.getProducts = asyncHandler(async (req, res) => {
 
 // GET /api/products/all — No pagination, for dropdowns
 exports.getAllProducts = asyncHandler(async (req, res) => {
-  const products = await Product.find({ isActive: true })
-    .select('title sku price stock unit')
+  const filter = { isActive: true };
+  if (req.user.role !== 'Admin') {
+    filter.createdBy = req.user._id;
+  }
+  const products = await Product.find(filter)
+    .select('title sku price stock unit createdBy')
+    .populate('createdBy', 'name')
     .sort({ title: 1 });
-
   res.json({ success: true, data: products });
 });
 
@@ -61,12 +71,15 @@ exports.getProduct = asyncHandler(async (req, res) => {
   if (!product) {
     throw new ApiError(404, 'Product not found');
   }
+  if (req.user.role !== 'Admin' && product.createdBy?.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, 'You do not have permission to view this product');
+  }
   res.json({ success: true, data: product });
 });
 
 // POST /api/products
 exports.createProduct = asyncHandler(async (req, res) => {
-  const product = await Product.create(req.body);
+  const product = await Product.create({ ...req.body, createdBy: req.user._id });
   logActivity({ user: req.user, action: 'create', entity: 'Product', entityId: product._id, description: `Created product "${product.title}"` });
   res.status(201).json({
     success: true,
@@ -77,35 +90,30 @@ exports.createProduct = asyncHandler(async (req, res) => {
 
 // PUT /api/products/:id
 exports.updateProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findByIdAndUpdate(req.params.id, req.body, {
-    new: true,
-    runValidators: true,
-  });
-
+  let product = await Product.findById(req.params.id);
   if (!product) {
     throw new ApiError(404, 'Product not found');
   }
-
+  if (req.user.role !== 'Admin' && product.createdBy?.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, 'You can only update your own products');
+  }
+  product = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
   logActivity({ user: req.user, action: 'update', entity: 'Product', entityId: product._id, description: `Updated product "${product.title}"` });
-  res.json({
-    success: true,
-    message: 'Product updated successfully',
-    data: product,
-  });
+  res.json({ success: true, message: 'Product updated successfully', data: product });
 });
 
 // DELETE /api/products/:id
 exports.deleteProduct = asyncHandler(async (req, res) => {
-  const product = await Product.findByIdAndDelete(req.params.id);
+  const product = await Product.findById(req.params.id);
   if (!product) {
     throw new ApiError(404, 'Product not found');
   }
-
+  if (req.user.role !== 'Admin' && product.createdBy?.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, 'You can only delete your own products');
+  }
+  await Product.findByIdAndDelete(req.params.id);
   logActivity({ user: req.user, action: 'delete', entity: 'Product', entityId: product._id, description: `Deleted product "${product.title}"` });
-  res.json({
-    success: true,
-    message: 'Product deleted successfully',
-  });
+  res.json({ success: true, message: 'Product deleted successfully' });
 });
 
 // POST /api/products/import — Bulk import products from CSV data
@@ -142,6 +150,7 @@ exports.importProducts = asyncHandler(async (req, res) => {
         stock: Number(row.stock) || 0,
         reorderLevel: Number(row.reorderLevel) || 10,
         unit: row.unit || 'pcs',
+        createdBy: req.user._id,
       });
       results.created++;
     } catch (err) {

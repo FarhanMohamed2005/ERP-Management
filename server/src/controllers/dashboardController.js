@@ -3,6 +3,8 @@ const PurchaseOrder = require('../models/PurchaseOrder');
 const Product = require('../models/Product');
 const Customer = require('../models/Customer');
 const Invoice = require('../models/Invoice');
+const Expense = require('../models/Expense');
+const ActivityLog = require('../models/ActivityLog');
 const asyncHandler = require('../utils/asyncHandler');
 
 exports.getDashboardStats = asyncHandler(async (req, res) => {
@@ -16,12 +18,18 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
     invoices,
     recentSalesOrders,
     recentPurchaseOrders,
+    expenseAgg,
+    inventoryAgg,
+    recentActivity,
   ] = await Promise.all([
-    Product.countDocuments(),
+    Product.countDocuments(req.user.role !== 'Admin' ? { createdBy: req.user._id } : {}),
     Customer.countDocuments(),
     SalesOrder.countDocuments(),
     PurchaseOrder.countDocuments(),
-    Product.countDocuments({ $expr: { $lte: ['$stock', '$reorderLevel'] } }),
+    Product.countDocuments({
+      $expr: { $lte: ['$stock', '$reorderLevel'] },
+      ...(req.user.role !== 'Admin' ? { createdBy: req.user._id } : {}),
+    }),
     SalesOrder.find({ status: { $ne: 'Cancelled' } }).select('totalPrice createdAt'),
     Invoice.find().select('total status'),
     SalesOrder.find()
@@ -34,6 +42,19 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(5)
       .select('orderNumber supplier totalPrice status createdAt'),
+    Expense.aggregate([
+      { $match: { status: { $ne: 'Rejected' } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]),
+    Product.aggregate([
+      ...(req.user.role !== 'Admin' ? [{ $match: { createdBy: req.user._id } }] : []),
+      { $group: { _id: null, totalValue: { $sum: { $multiply: ['$price', '$stock'] } } } },
+    ]),
+    ActivityLog.find()
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .select('userName action entity description createdAt')
+      .lean(),
   ]);
 
   const totalRevenue = salesOrders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
@@ -75,11 +96,15 @@ exports.getDashboardStats = asyncHandler(async (req, res) => {
         totalRevenue,
         totalPaid,
         totalUnpaid,
+        totalExpenses: expenseAgg?.[0]?.total || 0,
+        inventoryValue: inventoryAgg?.[0]?.totalValue || 0,
+        profit: totalRevenue - (expenseAgg?.[0]?.total || 0),
       },
       monthlyRevenue,
       salesStatusDistribution: salesStatusDist,
       recentSalesOrders,
       recentPurchaseOrders,
+      recentActivity,
     },
   });
 });

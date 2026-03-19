@@ -50,6 +50,10 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
   },
   {
     timestamps: true,
@@ -59,5 +63,9 @@ const productSchema = new mongoose.Schema(
 productSchema.index({ title: 'text', sku: 'text' });
 productSchema.index({ category: 1 });
 productSchema.index({ isActive: 1, stock: 1 });
+productSchema.index({ createdBy: 1, createdAt: -1 });
+productSchema.index({ sku: 1 }, { unique: true });
+productSchema.index({ lastModified: -1 });
+productSchema.index({ stock: 1, reorderLevel: 1 }); // For low stock alerts
 
 module.exports = mongoose.model('Product', productSchema);

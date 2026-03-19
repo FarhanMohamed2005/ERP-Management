@@ -1,12 +1,22 @@
 const ApiError = require('../utils/ApiError');
+const logger = require('../utils/logger');
 
 const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
 
-  if (process.env.NODE_ENV === 'development') {
-    console.error('Error:', err);
-  }
+  // Log the error
+  logger.error(
+    `${req.method} ${req.originalUrl} - ${err.message}`,
+    err,
+    {
+      userId: req.user?._id,
+      userRole: req.user?.role,
+      ip: req.ip,
+      method: req.method,
+      path: req.originalUrl,
+    }
+  );
 
   // Mongoose bad ObjectId
   if (err.name === 'CastError') {
